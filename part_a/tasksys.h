@@ -52,10 +52,23 @@ public:
  */
 class TaskSystemParallelThreadPoolSpinning : public ITaskSystem
 {
+private:
+    std::thread *threadsPool_;
+    int remainingTasks_;
+    int num_threads_;
+    std::mutex *mutex_;
+    IRunnable *runnable_;
+    int num_total_tasks_;
+    std::condition_variable *done_;
+    bool finished_;
+    std::mutex *done_mutex_;
+    int finished_tasks_;
+
 public:
     TaskSystemParallelThreadPoolSpinning(int num_threads);
     ~TaskSystemParallelThreadPoolSpinning();
     const char *name();
+    void threadRunner();
     void run(IRunnable *runnable, int num_total_tasks);
     TaskID runAsyncWithDeps(IRunnable *runnable, int num_total_tasks,
                             const std::vector<TaskID> &deps);
