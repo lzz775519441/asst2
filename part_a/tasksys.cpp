@@ -211,37 +211,93 @@ const char *TaskSystemParallelThreadPoolSleeping::name()
 
 TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int num_threads) : ITaskSystem(num_threads)
 {
-    //
-    // TODO: CS149 student implementations may decide to perform setup
-    // operations (such as thread pool construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
+    mutex_ = new std::mutex();
+    done_mutex_ = new std::mutex();
+    job_coming_mutex_ = new std::mutex();
+    job_coming_ = new std::condition_variable();
+    done_ = new std::condition_variable();
+    threadsPool_ = new std::thread[num_threads];
+    num_threads_ = num_threads;
+    num_total_tasks_ = 0;
+    remainingTasks_ = 0;
+    finished_tasks_ = 0;
+    finished_ = false;
+    runnable_ = nullptr;
+    for (int i = 0; i < num_threads_; i++)
+        threadsPool_[i] = std::thread(&TaskSystemParallelThreadPoolSleeping::threadRunner, this);
 }
 
 TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping()
 {
-    //
-    // TODO: CS149 student implementations may decide to perform cleanup
-    // operations (such as thread pool shutdown construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
+    finished_ = true;
+    job_coming_mutex_->lock();
+    job_coming_mutex_->unlock();
+    job_coming_->notify_all();
+    for (int i = 0; i < num_threads_; i++)
+        threadsPool_[i].join();
+    delete[] threadsPool_;
+    delete mutex_;
+    delete done_mutex_;
+    delete job_coming_mutex_;
+    delete done_;
+    delete job_coming_;
+}
+
+void TaskSystemParallelThreadPoolSleeping::threadRunner()
+{
+    int task_id;
+    while (!finished_)
+    {
+        mutex_->lock();
+        if (remainingTasks_ > 0)
+        {
+            task_id = num_total_tasks_ - remainingTasks_;
+            remainingTasks_--;
+            mutex_->unlock();
+
+            runnable_->runTask(task_id, num_total_tasks_);
+
+            mutex_->lock();
+            finished_tasks_++;
+            if (finished_tasks_ == num_total_tasks_)
+            {
+                mutex_->unlock();
+
+                done_mutex_->lock();
+                done_mutex_->unlock();
+                done_->notify_all();
+            }
+            else
+                mutex_->unlock();
+        }
+        else
+        {
+            mutex_->unlock();
+
+            std::unique_lock<std::mutex> lk(*job_coming_mutex_);
+            job_coming_->wait(lk);
+            lk.unlock();
+        }
+    }
 }
 
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable *runnable, int num_total_tasks)
 {
+    std::unique_lock<std::mutex> lk(*done_mutex_);
 
-    //
-    // TODO: CS149 students will modify the implementation of this
-    // method in Parts A and B.  The implementation provided below runs all
-    // tasks sequentially on the calling thread.
-    //
+    mutex_->lock();
+    finished_tasks_ = 0;
+    runnable_ = runnable;
+    remainingTasks_ = num_total_tasks;
+    num_total_tasks_ = num_total_tasks;
+    mutex_->unlock();
 
-    for (int i = 0; i < num_total_tasks; i++)
-    {
-        runnable->runTask(i, num_total_tasks);
-    }
+    job_coming_mutex_->lock();
+    job_coming_mutex_->unlock();
+    job_coming_->notify_all();
+
+    done_->wait(lk);
+    lk.unlock();
 }
 
 TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable *runnable, int num_total_tasks,
