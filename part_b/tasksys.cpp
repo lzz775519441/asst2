@@ -198,41 +198,44 @@ void TaskSystemParallelThreadPoolSleeping::threadRunner()
         }
         else
         {
-            currentTask = &ready_queue_.front();
             ready_queue_mutex_->unlock();
-
-            mutex_->lock();
-            if (currentTask->left_task == 0)
-            {
-                mutex_->unlock();
-                continue;
-            }
-            task_id = currentTask->num_total_tasks - currentTask->left_task;
-            total = currentTask->num_total_tasks;
-            currentTask->left_task--;
-            mutex_->unlock();
-
-            currentTask->runnable->runTask(task_id, total);
-
-            mutex_->lock();
-            currentTask->finished_task++;
-            if (currentTask->finished_task == currentTask->num_total_tasks)
+            while (!killed_)
             {
                 ready_queue_mutex_->lock();
-                finished_id_ = std::max(finished_id_, currentTask->task_id);
-                ready_queue_.pop();
                 if (ready_queue_.empty())
                 {
                     ready_queue_mutex_->unlock();
-                    mutex_->unlock();
-                    continue;
+                    break;
                 }
                 currentTask = &ready_queue_.front();
                 ready_queue_mutex_->unlock();
+
+                mutex_->lock();
+                if (currentTask->left_task == 0)
+                {
+                    mutex_->unlock();
+
+                    ready_queue_mutex_->lock();
+                    if (!ready_queue_.empty() && &ready_queue_.front() == currentTask)
+                        ready_queue_.pop();
+                    ready_queue_mutex_->unlock();
+                    continue;
+                }
+                task_id = currentTask->num_total_tasks - currentTask->left_task;
+                total = currentTask->num_total_tasks;
+                currentTask->left_task--;
                 mutex_->unlock();
+
+                currentTask->runnable->runTask(task_id, total);
+
+                mutex_->lock();
+                currentTask->finished_task++;
+                if (currentTask->finished_task == currentTask->num_total_tasks)
+                    finished_id_ = std::max(finished_id_, currentTask->task_id);
+                mutex_->unlock();
+
+                break;
             }
-            else
-                mutex_->unlock();
         }
     }
 }
@@ -269,15 +272,12 @@ void TaskSystemParallelThreadPoolSleeping::sync()
 {
     while (true)
     {
-        ready_queue_mutex_->lock();
-        waiting_queue_mutex_->lock();
-        if (ready_queue_.empty() && waiting_queue_.empty())
+        mutex_->lock();
+        if (finished_id_ == bulk_task_id_ - 1)
         {
-            waiting_queue_mutex_->unlock();
-            ready_queue_mutex_->unlock();
+            mutex_->unlock();
             break;
         }
-        waiting_queue_mutex_->unlock();
-        ready_queue_mutex_->unlock();
+        mutex_->unlock();
     }
 }
